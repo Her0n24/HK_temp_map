@@ -38,11 +38,6 @@ input/hk_coast_2022/Hong_Kong_18_Districts/HKDistrict18.shx
 input/hk_coast_2022/Hong_Kong_18_Districts/HKDistrict18.shx:Zone.Identifier
 input/hk_coast_2022/Hong_Kong_18_Districts/HKDistrict18.xml
 input/hk_coast_2022/Hong_Kong_18_Districts/HKDistrict18.xml:Zone.Identifier
-input/hk_coast_2022/Hong_Kong_18_Districts/reprojected_HKDistrict18.cpg
-input/hk_coast_2022/Hong_Kong_18_Districts/reprojected_HKDistrict18.dbf
-input/hk_coast_2022/Hong_Kong_18_Districts/reprojected_HKDistrict18.prj
-input/hk_coast_2022/Hong_Kong_18_Districts/reprojected_HKDistrict18.shp
-input/hk_coast_2022/Hong_Kong_18_Districts/reprojected_HKDistrict18.shx
 output/HK_temp_map_newcolor_202409121510.png
 output/HK_temp_map_newcolor_202409121610.png
 output/HK_temp_map_newcolor_202409121700.png
