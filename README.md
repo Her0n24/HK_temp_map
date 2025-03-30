@@ -7,4 +7,4 @@ This project visualises the temperature distribution across Hong Kong in a visua
 
 ⚠ Note: This interpolation is for visualisation purposes only and does not represent the actual temperature distribution.
 
-Currently, plotting takes up to 10 minutes due to the repetitive rendering of coastline shapes and polygons. Future improvements will focus on optimising computation and reducing plotting time. Additionally, integrating numerical model outputs could further enhance the accuracy and applicability of the visualisation.
+New version of the script should generate output in 10 seconds, given the coastline shapes and polygons are already rendered. Future improvements will focus on integrating numerical model outputs could further enhance the accuracy and applicability of the visualisation. Extension can be made to plot other meteorological variables such as humidity, wind and wind direction.
