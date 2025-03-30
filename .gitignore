@@ -130,3 +130,4 @@ output/HK_temp_map_newcolor.png
 output/HK_temp_map.png
 output/reprojected_HKDistrict18_plot.png
 output/SHP_file_test.png
+__pycache__

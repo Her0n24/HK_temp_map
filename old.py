@@ -11,9 +11,14 @@ import cmweather
 import requests
 import os
 from matplotlib.path import Path
+import geopandas as gpd
+from cartopy.feature import ShapelyFeature
+from shapely.geometry import shape, Point, Polygon
+from tqdm import tqdm
+
 
 stations = {}
-stations_csv_file_path = 'station_location.csv'
+stations_csv_file_path = '/home/heron_ng/dev/HK_temp_map/input/station_location.csv'
 
 with open(stations_csv_file_path, mode='r', encoding='utf-8-sig') as file:
     csv_reader = csv.DictReader(file)
@@ -75,15 +80,6 @@ proj = ccrs.PlateCarree()
 fig = plt.figure(figsize=(12, 6))
 main_ax = fig.add_subplot(1, 1, 1, projection=proj)
 main_ax.set_extent([minlon, maxlon, minlat, maxlat], crs=proj)
-# main_ax.gridlines(draw_labels=True)
-
-# # Plot station data points
-# for station_name, station_data in stations.items():
-#     lat = station_data['lat']
-#     lon = station_data['long']
-#     T = station_data['temperature']
-#     main_ax.plot(lon, lat, 'o', c= 'black', markersize= 2)
-#     main_ax.text(lon, lat, f'{station_name}\nTemp: {T}°C', color='black', fontsize=5, ha='left')#, weight = 'bold')
 
 # Filter out stations with 'N/A' temperature values
 valid_stations = {name: data for name, data in stations.items() if isinstance(data.get('temperature'), float)}
@@ -94,14 +90,9 @@ lat = np.array([data['lat'] for data in valid_stations.values()])
 T = np.array([data['temperature'] for data in valid_stations.values() if isinstance(data.get('temperature'), float)])
 
 # Generate interpolated temperature data
-xi = np.linspace(minlon, maxlon, 100)
-yi = np.linspace(minlat, maxlat, 100)
+xi = np.linspace(minlon, maxlon, 400)
+yi = np.linspace(minlat, maxlat, 400)
 X, Y = np.meshgrid(xi, yi)
-
-# lon = np.array([station_data['long'] for station_data in stations.values()])
-# lat = np.array([station_data['lat'] for station_data in stations.values()])
-#T = np.array([station_data['temperature'] for station_data in stations.values()])
-# T = np.array([data['temperature'] for data in valid_stations.values() if isinstance(data.get('temperature'), float)])
 
 # Calculate the average temperature value from all existing stations
 avg_temperature = np.mean([data['temperature'] for data in valid_stations.values()])
@@ -126,27 +117,99 @@ Z = griddata((lon, lat), T, (X, Y), method='linear')
 print('plotting')
 
 # Load and plot the coastline
-coastfile = '/home/heron_ng/.local/share/cartopy/shapefiles/gshhs/f/GSHHS_f_L1.shp'
-#coastfile = '/home/heron_ng/dev/HK_temp_map/input/hk_coast/Hong_Kong_Geological_Maps_in_1_to_100%2C000.shp'
+coastfile = '/home/heron_ng/dev/HK_temp_map/input/hk_coast_2022/Hong_Kong_18_Districts/reprojected_HKDistrict18.shp'
 coastlines = shpreader.Reader(coastfile)
+shp_path = '/home/heron_ng/dev/HK_temp_map/input/hk_coast_2022/Hong_Kong_18_Districts/reprojected_HKDistrict18.shp'
 
-for geometry in coastlines.geometries():
-    main_ax.add_geometries([geometry], proj, edgecolor='black', facecolor='none')
+gdf = gpd.read_file(shp_path)
+# Check CRS
+print("CRS of the shapefile:", gdf.crs)
 
-#land_polygons = [geometry for geometry in coastlines.geometries()]
+# Add coastline and border features from shapefile
+shapefile_feature = ShapelyFeature(gdf.geometry, proj, edgecolor=(0, 0, 0, 0.5), facecolor='none')
+main_ax.add_feature(shapefile_feature, linewidth=0.5)
 
-# Plot the interpolated temperature data on the map
+# Create a mask for the ocean (areas outside the shape)
+#ocean_mask = np.ones_like(Z)  # Initialize all as "ocean" (1)
+# Calculate total iterations for tqdm
+total_iterations = len(gdf) * Z.shape[0] * Z.shape[1]
 
-level = np.linspace(-2,45, 48 )
-c = main_ax.contourf(X, Y, Z, cmap='ChaseSpectral', levels= level, transform=proj, alpha=0.8)
-main_ax.add_feature(cf.OCEAN, facecolor='white', zorder = 100, edgecolor='k')
-plt.colorbar(c, ax=main_ax, label='2m Temperature (°C)', ticks = np.arange(-2,45,5))
+ocean_mask_file = '/home/heron_ng/dev/HK_temp_map/input/ocean_mask.npy'
+
+if not os.path.exists(ocean_mask_file):
+    print ("First time running, creating ocean mask. This may take 10 minutes...")
+    ocean_mask = np.ones_like(Z)
+
+    # Use tqdm with total iterations
+    with tqdm(total=total_iterations) as pbar:
+        for _, row in gdf.iterrows():  # Iterate over polygons
+            polygon = row['geometry']  # Get the polygon
+            for i in range(Z.shape[0]):  # Iterate over rows
+                for j in range(Z.shape[1]):  # Iterate over columns
+                    point = Point(X[i, j], Y[i, j])  # Create a Shapely Point
+                    if polygon.contains(point):  # Check if the point is within the polygon
+                        ocean_mask[i, j] = 0  # Mark as "land" (0)
+                    pbar.update(1)  # Update progress bar
+    
+    # Save the ocean mask to a file
+    np.save(ocean_mask_file, ocean_mask)
+    print(f"Ocean mask saved to {ocean_mask_file}")
+else:
+    print(f"Ocean mask file already exist at {ocean_mask_file}")
+
+if os.path.exists(ocean_mask_file):
+    print(f"Loading ocean mask from {ocean_mask_file}")
+    ocean_mask = np.load(ocean_mask_file)
+    print(f"Ocean mask loaded from {ocean_mask_file}")
+else:
+    raise FileNotFoundError(f"Ocean mask file not found at {ocean_mask_file}")
+    exit()
+    
+# Mask the ocean areas with white
+masked_Z = np.ma.masked_where(ocean_mask == 1, Z)
+
+# plt.imshow(ocean_mask, origin='lower', extent=(minlon, maxlon, minlat, maxlat), cmap='gray')
+# plt.title('Ocean Mask (1 = Ocean, 0 = Land)')
+# plt.colorbar(label='Mask Value')
+# plt.savefig('/home/heron_ng/dev/HK_temp_map/output/HK_temp_map_newcolor_shapefile_polygon.png')
+# plt.clf()
+
+# Plot the temperature data
+c = main_ax.contourf(X, Y, masked_Z, cmap='ChaseSpectral', levels=np.linspace(-2, 40, 43), transform=proj, alpha=0.8)
+
+# Add a white contour line at 0 degrees
+main_ax.contour(X, Y, masked_Z, levels=[0], colors='magenta', linewidths=0.5, transform=proj)
+main_ax.contour(X, Y, masked_Z, levels=[8], colors='lightgrey', linewidths=0.5, transform=proj)
+main_ax.contour(X, Y, masked_Z, levels=[12], colors='white', linewidths=0.5, transform=proj)
+main_ax.contour(X, Y, masked_Z, levels=[33], colors='white', linewidths=0.5, transform=proj)
+main_ax.contour(X, Y, masked_Z, levels=[35], colors='fuchsia', linewidths=0.5, transform=proj)
+
+# # Add a white overlay for the ocean
+# ocean_overlay = np.ma.masked_where(ocean_mask == 0, Z)  # Mask land areas
+# main_ax.contourf(X, Y, ocean_overlay, colors='white', transform=proj, alpha=1, zorder=100)
+
+# Add the coastline
+# for _, row in gdf.iterrows():
+#     main_ax.add_geometries([row['geometry']], crs=proj, edgecolor='black', facecolor='none', linewidth=0.5)
+cbar = plt.colorbar(c, ax=main_ax, label='2m Temperature (°C)', ticks = np.arange(-2,40,5))
+
+
+temperature_level = 12
+cbar.ax.axhline(temperature_level, color="white", linewidth=1)  # Add line
+temperature_level = 8
+cbar.ax.axhline(temperature_level, color="lightgrey", linewidth=1)  # Add line
+temperature_level = 0
+cbar.ax.axhline(temperature_level, color="magenta", linewidth=1)  # Add line
+temperature_level = 33
+cbar.ax.axhline(temperature_level, color="white", linewidth=1)  # Add line
+temperature_level = 35
+cbar.ax.axhline(temperature_level, color="fuchsia", linewidth=1)  # Add line
 
 # Define the virtual station names
 virtual_station_names = ['Station 1', 'Station 2', 'Station 3', 'Station 4']
 
 # Plot station data points
-for station_name, station_data in valid_stations.items():
+for station_name, station_data in tqdm(valid_stations.items()):
     if station_name in virtual_station_names:
         lat = station_data['lat']
         lon = station_data['long']
@@ -156,13 +219,13 @@ for station_name, station_data in valid_stations.items():
         lon = station_data['long']
         T = station_data['temperature']
         main_ax.plot(lon, lat, '^', c= 'green', markersize= 2, zorder= 101)
-        main_ax.text(lon, lat, f'{station_name}\n{T}°C', color='black', fontsize=5, ha='left', zorder = 102)#, weight = 'bold')
+        main_ax.text(lon, lat, f'{station_name}\n{T}°C', color='black', fontsize=7, ha='left', zorder = 102)#, weight = 'bold')
     else:
         lat = station_data['lat']
         lon = station_data['long']
         T = station_data['temperature']
         main_ax.plot(lon, lat, 'o', c= 'black', markersize= 2, zorder= 101)
-        main_ax.text(lon, lat, f'{station_name}\n{T}°C', color='black', fontsize=5, ha='left', zorder = 102)#, weight = 'bold')
+        main_ax.text(lon, lat, f'{station_name}\n{T}°C', color='black', fontsize=7, ha='left', zorder = 102)#, weight = 'bold')
 
 plt.text(.01, .01, f'datetime {datetime} HKT', ha='left', va='bottom', transform=main_ax.transAxes, zorder = 103)
 
@@ -175,11 +238,10 @@ max_station = max(valid_stations.items(), key=lambda x: x[1]['temperature'])[0]
 max_temp = valid_stations[max_station]['temperature']
 
 # Output the station names and temperatures
-plt.text(.99, .03, f'maximum: {max_temp}°C {max_station}', ha='right', va='bottom', transform=main_ax.transAxes, zorder = 103, fontsize=7)
-plt.text(.99, .01, f'minimum: {min_temp}°C {min_station}', ha='right', va='bottom', transform=main_ax.transAxes, zorder = 103, fontsize=7)
+plt.text(.99, .03, f'maximum: {max_temp}°C {max_station}', ha='right', va='bottom', transform=main_ax.transAxes, zorder = 103, fontsize=7, color = 'red')
+plt.text(.99, .01, f'minimum: {min_temp}°C {min_station}', ha='right', va='bottom', transform=main_ax.transAxes, zorder = 103, fontsize=7, color = 'blue')
 
 plt.tight_layout()
-plt.savefig(f'/home/heron_ng/dev/HK_temp_map/output/HK_temp_map_newcolor_{datetime}.png', dpi=500)
+plt.savefig(f'/home/heron_ng/dev/HK_temp_map/output/HK_temp_map_newcolor_{datetime}_2022_coast.png', dpi=500)
 plt.clf()
-print(f'figure output to /home/heron_ng/dev/HK_temp_map/output/HK_temp_map_newcolor_{datetime}.png')
-
+print(f'figure output to /home/heron_ng/dev/HK_temp_map/output/HK_temp_map_newcolor_{datetime}_2022_coast.png')
